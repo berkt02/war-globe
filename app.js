@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 3;
+  const VERSION = 5;
   const SAVE_KEY = 'warglobe.v2';
   const SAT = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
   const FONT = ['Noto Sans Regular'];

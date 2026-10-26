@@ -86,11 +86,9 @@ function shapes() {
     [[left, toLonLat([0, 495])[1]]]);
   const takistan = ring([[left, toLonLat([0, 495])[1]]], rev(wbT), tCoast, [[28.62, 43.5], [left, 43.5]]);
   // the area whose imagery and countries are fully redrawn
-  const zone = turf.union(turf.featureCollection([
-    turf.bboxPolygon([w, s, e, n]),
-    turf.polygon([[[w, s + 0.005], [e, s + 0.005], [e, 43.65], [28.62, 43.65], [28.62, 43.72], [28.3, 43.82], [27.95, 44.0],
-      [w, 44.0], [w, s + 0.005]]]),
-  ]));
+  // irregular outline so the edge of the redrawn area doesn't read as a rectangle
+  const zone = turf.polygon([wobble([[w, 44.0], [w, (n + s) / 2], [w, n], [(w + e) / 2, n], [e, n], [e, 43.65],
+    [28.62, 43.65], [28.62, 43.72], [28.3, 43.82], [27.95, 44.0], [w, 44.0]], 6, 5)]);
   const islands = Object.values(ISLANDS).map((p) => ring(ll(p)));
   const lake = ring(ll(LAKE_BELOE));
   const ridge = turf.buffer(turf.lineString(ll(RIDGE)), 11, { units: 'kilometers' });

@@ -64,12 +64,14 @@ for (const f of Object.values(byId)) {
 const tks = turf.difference(fc(turf.union(fc(...tParts)), CH.zone));
 const tksZone = turf.intersect(fc(CH.takistan, CH.zone));
 const rusZone = turf.difference(fc(turf.intersect(fc(CH.russia, CH.zone)), CH.lake));
-byId.RUS.geometry = turf.union(fc(byId.RUS, rusZone)).geometry;
+// a hair of overlap so the seam along the zone edge doesn't leave a sliver (which would draw as a border line)
+const seam = (f) => turf.buffer(f, 0.4, { units: 'kilometers' });
+byId.RUS.geometry = turf.difference(fc(turf.union(fc(byId.RUS, seam(rusZone))), CH.chernarus)).geometry;
 const chernGeom = turf.union(fc(CH.chernarus, ...CH.islands)).geometry;
 byId.CHR = { type: 'Feature', geometry: chernGeom,
   properties: { id: 'CHR', name: 'Chernarus', nameRu: 'Чернорусь', lx: CH.label[0], ly: CH.label[1], minLabel: 2,
     cx: CH.cities[0][1], cy: CH.cities[0][2] } };
-byId.TKS = { type: 'Feature', geometry: turf.union(fc(tks, tksZone)).geometry,
+byId.TKS = { type: 'Feature', geometry: turf.difference(fc(turf.union(fc(seam(tks), tksZone)), CH.chernarus)).geometry,
   properties: { id: 'TKS', name: 'Takistan', nameRu: 'Такистан', lx: 26.6, ly: 43.6, minLabel: 2, cx: 26.45, cy: 43.05 } };
 byId.ROU.properties.lx = 24.6; byId.ROU.properties.ly = 45.8;
 byId.BGR.properties.lx = 24.4; byId.BGR.properties.ly = 42.6;
@@ -85,7 +87,7 @@ for (const pl of places.features) {
 // Green Sea: soft green tint rings in the western Black Sea, minus land
 const land = ['CHR', 'TKS', 'BGR', 'ROU', 'UKR', 'RUS', 'TUR', 'MDA'].map((k) => byId[k]).filter(Boolean);
 const tint = [];
-for (const [r, o] of Array.from({ length: 12 }, (_, i) => [40 + i * 22, 0.028])) {
+for (const [r, o] of Array.from({ length: 28 }, (_, i) => [30 + i * 10, 0.012])) {
   let e = turf.ellipse([29.0, 44.0], r * 1.15, r, { units: 'kilometers', steps: 64 });
   for (const l of land) { if (!e) break; e = turf.difference(fc(e, l)); }
   if (e) tint.push({ ...e, properties: { o } });

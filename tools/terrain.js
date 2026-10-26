@@ -137,7 +137,7 @@ const pad = (b, d) => [b[0] - d, b[1] - d, b[2] + d, b[3] + d];
   const zCenter = centerOf(zBox);
   const czech = await sampler(zCenter, SRC.czech, zBox, 10, 0.95);
   const alps = await sampler([zCenter[0], 45.3], SRC.alps, zBox, 10, 0.92);
-  const ukraine = await sampler(zCenter, SRC.ukraine, zBox, 10, 0.92);
+  const ukraine = await sampler(zCenter, SRC.ukraine, zBox, 10, 1.05);
   const zAfghan = await sampler(tCenter, SRC.afghan, zBox, 10, 0.95);
   const [mZone, mChr, mRus, mTks, mRidge] = await Promise.all([
     mask(fiction.zone, zBox, W, H, 40), mask(fiction.chernarus, zBox, W, H, 1.5), mask(fiction.russia, zBox, W, H, 1.5),
@@ -145,7 +145,10 @@ const pad = (b, d) => [b[0] - d, b[1] - d, b[2] + d, b[3] + d];
   ]);
   const land = new Float32Array(W * H);
   for (let i = 0; i < land.length; i++) land[i] = Math.min(1, mChr[i] + mRus[i] + mTks[i]);
-  const landImg = await sharp(Buffer.from(land.map((v) => v * 255)), { raw: { width: W, height: H, channels: 1 } }).blur(16).raw().toBuffer();
+  const landBytes = Buffer.alloc(W * H);
+  for (let i = 0; i < land.length; i++) landBytes[i] = Math.round(land[i] * 255);
+  const landImg = await sharp(landBytes, { raw: { width: W, height: H, channels: 1 } }).blur(16).extractChannel(0).raw().toBuffer();
+  if (landImg.length !== W * H) throw new Error('unexpected mask size ' + landImg.length);
 
   const sea = await mosaic(ESRI, 'esri', 9, [29.9, 43.8, 30.1, 43.95]);
   const deep = [0, 0, 0];
