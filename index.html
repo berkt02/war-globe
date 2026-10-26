@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>War Globe</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map"></div>
+  <div id="loading">Загрузка карты…</div>
+
+  <header id="topbar">
+    <div class="brand">⚔ War Globe</div>
+    <div class="side">Сторона: <span id="sideSwatch"></span><b id="sideName">—</b></div>
+    <div class="menu">
+      <button id="btnLayers" title="Слои">🗺</button>
+      <button id="btnExport" title="Сохранить в файл">💾</button>
+      <button id="btnImport" title="Загрузить из файла">📂</button>
+      <button id="btnReset" title="Сбросить карту">♻</button>
+      <input type="file" id="importFile" accept=".json" hidden>
+    </div>
+  </header>
+
+  <nav id="toolbar">
+    <button data-tool="select" class="active" title="Выбор / перемещение (Esc)"><span>🖐</span><i>Выбор</i></button>
+    <button data-tool="unit" title="Поставить подразделение"><span>➕</span><i>Войска</i></button>
+    <button data-tool="attack" title="Атака подразделением"><span>⚔</span><i>Атака</i></button>
+    <button data-tool="arrow" title="Стрелка наступления"><span>➜</span><i>Стрелка</i></button>
+    <button data-tool="missile" title="Ракетный удар"><span>🚀</span><i>Удар</i></button>
+    <button data-tool="zone" title="Зона контроля / оккупации"><span>🟥</span><i>Контроль</i></button>
+    <button data-tool="capture" title="Передвинуть границу (территория отходит стороне)"><span>🏴</span><i>Граница</i></button>
+    <button data-tool="newcountry" title="Новая страна"><span>🌐</span><i>Страна</i></button>
+    <button data-tool="erase" title="Удалить стрелку / удар"><span>🧽</span><i>Ластик</i></button>
+  </nav>
+  <div id="toolhint"></div>
+  <div id="toolopts"></div>
+
+  <aside id="panel" hidden></aside>
+
+  <section id="log">
+    <div class="loghead"><b>Сводка</b><button id="logToggle">▾</button></div>
+    <ol id="logList"></ol>
+  </section>
+
+  <div id="layersMenu" class="popover" hidden>
+    <label><input type="checkbox" data-layer="fills" checked> Заливка стран</label>
+    <label><input type="checkbox" data-layer="cities" checked> Города</label>
+    <label><input type="checkbox" data-layer="units" checked> Войска</label>
+    <label><input type="checkbox" data-layer="leaders" checked> Лидеры</label>
+    <label><input type="checkbox" data-layer="zones" checked> Зоны контроля</label>
+    <label><input type="checkbox" data-layer="arrows" checked> Стрелки</label>
+    <label><input type="checkbox" data-layer="strikes" checked> Удары</label>
+    <label><input type="checkbox" data-layer="details" checked> Области, дороги</label>
+    <label><input type="checkbox" data-layer="sat" checked> Спутник</label>
+  </div>
+
+  <dialog id="modal"><form method="dialog" id="modalForm"></form></dialog>
+
+  <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/@turf/turf@7.2.0/turf.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
