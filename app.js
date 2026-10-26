@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const VERSION = 5;
+  const VERSION = 6;
   const SAVE_KEY = 'warglobe.v2';
   const SAT = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
   const FONT = ['Noto Sans Regular'];
@@ -137,6 +137,7 @@
     attributionControl: { compact: true },
   });
   map.doubleClickZoom.disable();
+  map.dragRotate.disable();   // правая кнопка мыши двигает карту (см. bindEvents); поворот — кнопками компаса
   window.wg = { map, get state() { return state; } }; // для отладки из консоли
   new ResizeObserver(() => map.resize()).observe(document.getElementById('map'));
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
@@ -434,7 +435,7 @@
         el.className = 'tlabel';
         el.addEventListener('click', (e) => { e.stopPropagation(); lastMarkerClick = Date.now(); if (tool === 'erase') deleteItem('labels', l.id); });
         el.addEventListener('dblclick', (e) => { e.stopPropagation(); editLabel(l.id); });
-        el.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); deleteItem('labels', l.id); });
+        el.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); if (!rightDragged) deleteItem('labels', l.id); });
         m = new maplibregl.Marker({ element: el, draggable: true }).setLngLat([l.lng, l.lat]).addTo(map);
         m.on('dragstart', snapshot);
         m.on('dragend', () => { const it = state.labels.find((x) => x.id === l.id); if (!it) return; const p = m.getLngLat(); it.lng = p.lng; it.lat = p.lat; save(); });
@@ -555,14 +556,15 @@
   // ---------- tools ----------
   let tool = 'select';
   let lastMarkerClick = 0;
+  let rightDragged = false;
   let selectedCountry = null;
   let missileFrom = null;
   const brush = { size: 40, mode: 'control' };   // размер кисти в пикселях экрана
 
   const HINTS = {
     select: '',
-    brush: 'Зажми и веди — земля переходит стороне. Правая кнопка или «Стереть» — убрать. Ctrl+Z — отмена',
-    arrow: 'Зажми и проведи стрелку одним движением',
+    brush: 'Зажми и веди — земля переходит стороне. Alt или «Стереть» — убрать. Правая кнопка — двигать карту. Ctrl+Z — отмена',
+    arrow: 'Зажми и проведи стрелку одним движением. Правая кнопка — двигать карту',
     label: 'Кликни на карту и напиши подпись. Тащи — переместить, двойной клик — изменить',
     missile: 'Кликни точку пуска, затем цель',
     erase: 'Кликни по стрелке, удару или подписи, чтобы удалить (или правый клик в любом режиме)',
@@ -575,7 +577,7 @@
     hint.textContent = HINTS[t]; hint.classList.toggle('show', !!HINTS[t]);
     renderToolOpts();
     const drawing = ['brush', 'arrow'].includes(t);
-    if (drawing) { map.dragPan.disable(); map.dragRotate.disable(); } else { map.dragPan.enable(); map.dragRotate.enable(); }
+    if (drawing) map.dragPan.disable(); else map.dragPan.enable();
     map.getCanvas().style.cursor = t === 'select' ? '' : 'crosshair';
     document.getElementById('brushCursor').hidden = t !== 'brush';
     renderLabels(); renderLeaders();
@@ -674,7 +676,28 @@
         renderArrows(); save();
       }
     };
-    map.on('mousedown', (e) => { if (e.originalEvent.button === 0 || e.originalEvent.button === 2) start(e, e.originalEvent.button === 2); });
+    map.on('mousedown', (e) => { if (e.originalEvent.button === 0) start(e, e.originalEvent.altKey); });
+
+    // правая кнопка мыши: тащить карту в любом режиме
+    let rpan = null;
+    map.getCanvasContainer().addEventListener('mousedown', (e) => {
+      if (e.button !== 2) return;
+      rpan = { x: e.clientX, y: e.clientY, moved: false };
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!rpan) return;
+      const dx = e.clientX - rpan.x, dy = e.clientY - rpan.y;
+      if (!rpan.moved && Math.hypot(dx, dy) < 4) return;
+      rpan.moved = true;
+      map.panBy([-dx, -dy], { duration: 0 });
+      rpan.x = e.clientX; rpan.y = e.clientY;
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button !== 2 || !rpan) return;
+      rightDragged = rpan.moved; rpan = null;
+      setTimeout(() => { rightDragged = false; }, 50);
+    });
     map.on('mousemove', move);
     map.on('mouseup', end);
     map.getCanvasContainer().addEventListener('mouseleave', end);
@@ -696,7 +719,7 @@
       } else if (tool === 'erase') eraseAt(e.point);
     });
     // правый клик по стрелке / удару удаляет в любом режиме
-    map.on('contextmenu', (e) => { if (tool !== 'brush') eraseAt(e.point); });
+    map.on('contextmenu', (e) => { if (!rightDragged) eraseAt(e.point); });
 
     window.addEventListener('keydown', (e) => {
       if (document.querySelector('dialog[open]') || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) return;
