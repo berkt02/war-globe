@@ -56,7 +56,7 @@
     ['South Atlantic Ocean', -15, -25], ['Arctic Ocean', 10, 84], ['Red Sea', 38.4, 20.5], ['Persian Gulf', 51.4, 27.2],
     ['Norwegian Sea', 2, 68], ['Kara Sea', 70, 75], ['Sea of Japan', 135, 40], ['Bay of Bengal', 88, 15],
   ];
-  const REGIONS = [['BLACK MOUNTAINS', 28.55, 45.38], ['SOUTH ZAGORIA', 28.95, 44.8]];
+  const REGIONS = [['BLACK MOUNTAINS', 28.95, 45.2, 11], ['NORTH MOUNTAINS', 28.2, 45.27, 9], ['SOUTH ZAGORIA', 28.75, 44.83, 10]];
 
   // ---------- state ----------
   let baseWorld = null;          // исходная карта (из data/world.json)
@@ -115,7 +115,7 @@
       glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
       sky: { 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 1, 7, 0] },
       sources: {
-        sat: { type: 'raster', tiles: [SAT], tileSize: 256, maxzoom: 18, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' },
+        sat: { type: 'raster', tiles: [SAT], tileSize: 256, maxzoom: 18, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics; Sentinel-2 cloudless by EOX (Contains modified Copernicus Sentinel data 2020)' },
         ofm: { type: 'vector', url: 'https://tiles.openfreemap.org/planet', attribution: '© OpenFreeMap © OpenStreetMap' },
       },
       layers: [
@@ -134,7 +134,7 @@
   const empty = () => turf.featureCollection([]);
 
   map.once('style.load', async () => {
-    const [w, c, g] = await Promise.all(['world', 'cities', 'greensea'].map((n) => fetch(`data/${n}.json`).then((r) => r.json())));
+    const [w, c, g, terrain] = await Promise.all(['world', 'cities', 'greensea', 'terrain'].map((n) => fetch(`data/${n}.json`).then((r) => r.json())));
     baseWorld = w; cities = c;
     map.addSource('greensea', { type: 'geojson', data: g });
     map.addLayer({ id: 'greensea', type: 'fill', source: 'greensea', paint: { 'fill-color': '#1ed98a', 'fill-opacity': ['*', 1.6, ['get', 'o']] } });
@@ -146,7 +146,7 @@
     map.addSource('labels', { type: 'geojson', data: labelsData() });
     map.addSource('cities', { type: 'geojson', data: citiesData() });
     map.addSource('seas', { type: 'geojson', data: turf.featureCollection(SEAS.map(([n, x, y]) => turf.point([x, y], { n }))) });
-    map.addSource('regions', { type: 'geojson', data: turf.featureCollection(REGIONS.map(([n, x, y]) => turf.point([x, y], { n }))) });
+    map.addSource('regions', { type: 'geojson', data: turf.featureCollection(REGIONS.map(([n, x, y, sz]) => turf.point([x, y], { n, sz }))) });
     map.addSource('arrows', { type: 'geojson', data: empty() });
     map.addSource('zones', { type: 'geojson', data: empty() });
     map.addSource('strikes', { type: 'geojson', data: empty() });
@@ -201,8 +201,8 @@
     map.addLayer({ id: 'seas', type: 'symbol', source: 'seas', layout: {
       'text-field': ['get', 'n'], 'text-font': FONT_I, 'text-size': 11.5, 'text-letter-spacing': 0.15, 'text-max-width': 6,
     }, paint: { 'text-color': '#a9bcd8', 'text-halo-color': '#0a1530', 'text-halo-width': 1 } });
-    map.addLayer({ id: 'regions', type: 'symbol', source: 'regions', minzoom: 5, layout: {
-      'text-field': ['get', 'n'], 'text-font': FONT_B, 'text-size': 11, 'text-letter-spacing': 0.2,
+    map.addLayer({ id: 'regions', type: 'symbol', source: 'regions', minzoom: 4.5, layout: {
+      'text-field': ['get', 'n'], 'text-font': FONT_B, 'text-size': ['get', 'sz'], 'text-letter-spacing': 0.2,
     }, paint: { 'text-color': '#e9e2c8', 'text-halo-color': '#000', 'text-halo-width': 1.2 } });
     map.addLayer({ id: 'places', type: 'symbol', source: 'ofm', 'source-layer': 'place', minzoom: 5.5,
       filter: ['all', ['match', ['get', 'class'], ['city', 'town'], true, false], ['!', ['within', FICTION_AREA]]],
@@ -224,11 +224,20 @@
       'text-max-width': 7, 'symbol-sort-key': ['get', 'minLabel'],
     }, paint: { 'text-color': '#fff', 'text-halo-color': '#000', 'text-halo-width': 1.4 } });
 
+    // вымышленный рельеф (Такистан, Чёрные горы, новое море) — под заливкой стран, поверх дорог
+    for (const t of terrain) {
+      map.addSource('terrain-' + t.id, { type: 'image', url: t.url, coordinates: t.coordinates });
+      map.addLayer({ id: 'terrain-' + t.id, type: 'raster', source: 'terrain-' + t.id, paint: { 'raster-fade-duration': 0 } }, 'greensea');
+    }
+    map.moveLayer('roads', 'terrain-' + terrain[0].id);
+    map.moveLayer('admin1', 'terrain-' + terrain[0].id);
+
     renderAll();
     bindMapEvents();
     updateSide();
     renderLog();
     document.getElementById('loading').remove();
+    document.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
   });
 
   function countriesData() {
@@ -365,8 +374,8 @@
     u('UKR', '47-я ОМБр', 'mech', 'brig', 34.6, 48.2, 4500, 60, 110, 36);
     u('UKR', 'ОК «Юг»', 'mech', 'corp', 31.3, 48.6, 30000, 160, 380, 200);
     u('CHR', '1-я мотострелковая дивизия ЧДКЗ', 'mech', 'div', 28.3, 44.4, 12000, 90, 210, 72);
-    u('CHR', 'Береговая охрана Утёса', 'navy', 'bat', 29.1, 44.2, 900, 0, 0, 8);
-    u('CHR', 'NAPA (партизаны)', 'inf', 'brig', 27.9, 45.0, 2500);
+    u('CHR', 'Береговая охрана Утёса', 'navy', 'bat', 29.5, 44.5, 900, 0, 0, 8);
+    u('CHR', 'NAPA (партизаны)', 'inf', 'brig', 28.4, 45.12, 2500);
     u('TKS', 'Армия Такистана', 'inf', 'army', 26.2, 43.3, 35000, 120, 260, 140, 18);
     u('TKS', 'ТЛА (ополчение)', 'inf', 'brig', 25.8, 43.75, 4000);
     state.arrows.push({ id: uid(), cid: 'RUS', pts: [[31.4, 46.9], [30.9, 46.65], [30.55, 46.48]] });

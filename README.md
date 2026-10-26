@@ -9,4 +9,7 @@
 Данные карты (`data/*.json`) собраны скриптом `tools/build.js` из Natural Earth
 (Чернорусь и Такистан вырезаны из Румынии/Болгарии, Крым и новые регионы до Одессы — в составе России).
 
+Вымышленный рельеф (`data/terrain/`, скрипт `tools/terrain.js`): Такистан — снимки Афганистана, Чёрные горы — Альпы,
+Южная Загорье — Чехия; источник Sentinel-2 cloudless 2020 by EOX (CC BY-NC-SA 4.0).
+
 Подложка: Esri World Imagery, детали — OpenFreeMap / OpenStreetMap, фото лидеров — Википедия, флаги — flagcdn.com.
