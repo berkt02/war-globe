@@ -162,8 +162,9 @@ dialog h3 { margin: 0 0 10px; }
   #log { left: 8px; right: 52px; width: auto; bottom: 86px; max-height: 22vh; }
   .maplibregl-ctrl-bottom-right { bottom: 80px; }
   #panel { left: 8px; right: 8px; width: auto; top: auto; bottom: 8px; max-height: 60vh; }
-  #toolhint { bottom: auto; top: 58px; }
-  #toolopts { left: 8px; top: 96px; }
+  #toolhint { bottom: 92px; font-size: 12px; }
+  #toolopts { top: 58px; }
+  #toolopts { left: 8px; right: 8px; }
   .popover { right: 8px; transform: none; }
 }
 
@@ -191,3 +192,26 @@ dialog h3 { margin: 0 0 10px; }
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 9;
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 18px;
 }
+
+/* text labels: группировки, численность */
+.tlabel {
+  font: 800 calc(13px * var(--ts, 1))/1.15 system-ui, sans-serif; color: #fff; white-space: pre; text-align: center;
+  padding: 2px 6px; border-radius: 6px; cursor: grab; letter-spacing: .2px;
+  background: color-mix(in srgb, var(--c) 55%, #000 45%); border: 1.5px solid var(--c);
+  text-shadow: 0 1px 2px #000; box-shadow: 0 2px 6px #0009;
+}
+.hide-tlabels .tlabel { display: none; }
+
+#brushCursor {
+  position: absolute; z-index: 4; pointer-events: none; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 0 0 1px #000a, inset 0 0 0 1px #000a;
+}
+#brushCursor[hidden] { display: none; }
+
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { background: transparent; border: 0; padding: 4px 10px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on { background: #ff4d3d; color: #fff; }
+.btn.small { padding: 2px 8px; font-size: 12px; }
+.btn[disabled] { opacity: .4; cursor: default; }
+#toolopts label { display: inline-flex; align-items: center; gap: 6px; }

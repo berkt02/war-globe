@@ -1,6 +1,7 @@
-// Paints fictional terrain as image overlays: real imagery from elsewhere is "transplanted" onto
-// Takistan (Afghan desert + mountains) and the Black Mountains (Alps), and new sea is painted over land.
-// Imagery: Sentinel-2 cloudless 2020 by EOX (CC BY-NC-SA 4.0). Usage: node terrain.js <dataDir> <tileCacheDir>
+// Paints the fictional terrain as image overlays. Real imagery from elsewhere is "transplanted" at true scale:
+// Chernarus = Czech countryside, Black Mountains = the Alps, Takistan = southern Afghanistan, northern shore = Ukraine;
+// sea is painted wherever the traced map has water. Imagery: Sentinel-2 cloudless 2020 by EOX (CC BY-NC-SA 4.0).
+// Usage: node terrain.js <dataDir> <tileCacheDir>
 const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
@@ -8,8 +9,8 @@ const turf = require('@turf/turf');
 
 const [, , dataDir, cacheDir] = process.argv;
 const fiction = JSON.parse(fs.readFileSync(path.join(dataDir, 'fiction.json')));
-const outDir = path.join(dataDir, 'terrain');
-fs.mkdirSync(outDir, { recursive: true });
+fs.rmSync(path.join(dataDir, 'terrain'), { recursive: true, force: true });
+fs.mkdirSync(path.join(dataDir, 'terrain'), { recursive: true });
 fs.mkdirSync(cacheDir, { recursive: true });
 
 const EOX = (z, x, y) => `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/${z}/${y}/${x}.jpg`;
@@ -19,6 +20,7 @@ const mercY = (lat) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
 const invMercY = (y) => (Math.atan(Math.exp(y)) * 360) / Math.PI - 90;
 const lon2px = (lon, z) => ((lon + 180) / 360) * 256 * 2 ** z;
 const lat2px = (lat, z) => ((1 - mercY(lat) / Math.PI) / 2) * 256 * 2 ** z;
+const cos = (d) => Math.cos((d * Math.PI) / 180);
 
 async function tile(urlFn, name, z, x, y) {
   const f = path.join(cacheDir, `${name}-${z}-${x}-${y}.jpg`);
@@ -35,7 +37,7 @@ async function tile(urlFn, name, z, x, y) {
   return f;
 }
 
-// Raw RGB mosaic of source imagery covering [w, s, e, n]
+// Raw RGB mosaic of imagery covering [w, s, e, n]
 async function mosaic(urlFn, name, z, [w, s, e, n]) {
   const x0 = Math.floor(lon2px(w, z) / 256), x1 = Math.floor(lon2px(e, z) / 256);
   const y0 = Math.floor(lat2px(n, z) / 256), y1 = Math.floor(lat2px(s, z) / 256);
@@ -52,19 +54,27 @@ async function mosaic(urlFn, name, z, [w, s, e, n]) {
   return { buf, W, H, ox: x0 * 256, oy: y0 * 256, z };
 }
 
-function sample(m, lon, lat, out, o) {
-  const fx = lon2px(lon, m.z) - m.ox - 0.5, fy = lat2px(lat, m.z) - m.oy - 0.5;
-  const x = Math.max(0, Math.min(m.W - 2, Math.floor(fx))), y = Math.max(0, Math.min(m.H - 2, Math.floor(fy)));
-  const ax = Math.min(1, Math.max(0, fx - x)), ay = Math.min(1, Math.max(0, fy - y));
-  for (let c = 0; c < 3; c++) {
-    const p = (yy, xx) => m.buf[(yy * m.W + xx) * 3 + c];
-    const top = p(y, x) * (1 - ax) + p(y, x + 1) * ax;
-    const bot = p(y + 1, x) * (1 - ax) + p(y + 1, x + 1) * ax;
-    out[o + c] = top * (1 - ay) + bot * ay;
-  }
+// A sampler that reads imagery around srcCenter as if it were located at tgtCenter (same km scale).
+async function sampler(tgtCenter, srcCenter, bbox, z, gain = 1) {
+  const kx = cos(tgtCenter[1]) / cos(srcCenter[1]);
+  const map = (lon, lat) => [srcCenter[0] + (lon - tgtCenter[0]) * kx, srcCenter[1] + (lat - tgtCenter[1])];
+  const [a, b] = map(bbox[0], bbox[1]), [c, d] = map(bbox[2], bbox[3]);
+  const m = await mosaic(EOX, 'eox', z, [a, b, c, d]);
+  return (lon, lat, out, o) => {
+    const [sl, sa] = map(lon, lat);
+    const fx = lon2px(sl, m.z) - m.ox - 0.5, fy = lat2px(sa, m.z) - m.oy - 0.5;
+    const x = Math.max(0, Math.min(m.W - 2, Math.floor(fx))), y = Math.max(0, Math.min(m.H - 2, Math.floor(fy)));
+    const ax = Math.min(1, Math.max(0, fx - x)), ay = Math.min(1, Math.max(0, fy - y));
+    for (let ch = 0; ch < 3; ch++) {
+      const p = (yy, xx) => m.buf[(yy * m.W + xx) * 3 + ch];
+      const top = p(y, x) * (1 - ax) + p(y, x + 1) * ax;
+      const bot = p(y + 1, x) * (1 - ax) + p(y + 1, x + 1) * ax;
+      out[o + ch] = (top * (1 - ay) + bot * ay) * gain;
+    }
+  };
 }
 
-// Alpha mask (feathered polygon) in the output image's pixel space
+// Feathered polygon mask (0..1 floats) in the output image's pixel space
 async function mask(geom, bbox, W, H, blur) {
   const [w, s, e, n] = bbox;
   const px = ([lon, lat]) => `${(((lon - w) / (e - w)) * W).toFixed(1)},${(((mercY(n) - mercY(lat)) / (mercY(n) - mercY(s))) * H).toFixed(1)}`;
@@ -73,79 +83,93 @@ async function mask(geom, bbox, W, H, blur) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="100%" height="100%" fill="#000"/><path d="${d}" fill="#fff" fill-rule="evenodd"/></svg>`;
   let img = sharp(Buffer.from(svg)).greyscale();
   if (blur) img = img.blur(blur);
-  return img.raw().toBuffer();
+  const raw = await img.raw().toBuffer();
+  const out = new Float32Array(W * H);
+  for (let i = 0; i < out.length; i++) out[i] = raw[i] / 255;
+  return out;
 }
 
-function outputSize(bbox, W) {
-  const [w, s, e, n] = bbox;
-  const H = Math.round((W * (mercY(n) - mercY(s))) / (((e - w) * Math.PI) / 180));
-  return H;
-}
+const heightFor = ([w, s, e, n], W) => Math.round((W * (mercY(n) - mercY(s))) / (((e - w) * Math.PI) / 180));
+const centerOf = (b) => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
 
 async function write(id, bbox, W, H, rgb, alpha) {
   const rgba = Buffer.alloc(W * H * 4);
   for (let i = 0; i < W * H; i++) {
-    rgba[i * 4] = rgb[i * 3]; rgba[i * 4 + 1] = rgb[i * 3 + 1]; rgba[i * 4 + 2] = rgb[i * 3 + 2];
-    rgba[i * 4 + 3] = alpha[i];
+    for (let c = 0; c < 3; c++) rgba[i * 4 + c] = Math.max(0, Math.min(255, rgb[i * 3 + c]));
+    rgba[i * 4 + 3] = Math.round(alpha[i] * 255);
   }
   const file = `terrain/${id}.webp`;
-  await sharp(rgba, { raw: { width: W, height: H, channels: 4 } }).webp({ quality: 80, alphaQuality: 70 }).toFile(path.join(dataDir, file));
+  await sharp(rgba, { raw: { width: W, height: H, channels: 4 } }).webp({ quality: 80, alphaQuality: 80 }).toFile(path.join(dataDir, file));
   const [w, s, e, n] = bbox;
   console.log(id, `${W}x${H}`, Math.round(fs.statSync(path.join(dataDir, file)).size / 1024) + ' KB');
   return { id, url: `data/${file}`, coordinates: [[w, n], [e, n], [e, s], [w, s]] };
 }
 
-// Transplant imagery around srcCenter onto the target shape, keeping real-world scale (km).
-async function transplant(id, geom, srcCenter, W, { z = 11, blur = 10, gain = 1 } = {}) {
-  const b = turf.bbox(geom);
-  const bbox = [b[0] - 0.08, b[1] - 0.06, b[2] + 0.08, b[3] + 0.06];
+function forEachPixel(bbox, W, H, fn) {
   const [w, s, e, n] = bbox;
-  const midLat = (s + n) / 2;
-  const kmW = (e - w) * 111.32 * Math.cos((midLat * Math.PI) / 180), kmH = (n - s) * 111.32;
-  const dLon = kmW / (111.32 * Math.cos((srcCenter[1] * Math.PI) / 180)), dLat = kmH / 111.32;
-  const src = [srcCenter[0] - dLon / 2, srcCenter[1] - dLat / 2, srcCenter[0] + dLon / 2, srcCenter[1] + dLat / 2];
-  const m = await mosaic(EOX, 'eox', z, src);
-  const H = outputSize(bbox, W);
-  const rgb = new Float32Array(W * H * 3);
   const yN = mercY(n), yS = mercY(s);
   for (let j = 0; j < H; j++) {
     const lat = invMercY(yN + ((j + 0.5) / H) * (yS - yN));
-    const v = (lat - s) / (n - s);
-    for (let i = 0; i < W; i++) {
-      const u = (i + 0.5) / W;
-      sample(m, src[0] + u * (src[2] - src[0]), src[1] + v * (src[3] - src[1]), rgb, (j * W + i) * 3);
-    }
+    for (let i = 0; i < W; i++) fn(j * W + i, w + ((i + 0.5) / W) * (e - w), lat);
   }
-  const out = Buffer.alloc(W * H * 3);
-  for (let i = 0; i < out.length; i++) out[i] = Math.max(0, Math.min(255, rgb[i] * gain));
-  return write(id, bbox, W, H, out, await mask(geom, bbox, W, H, blur));
 }
 
-// Paint new sea in the colour of the real sea nearby.
-async function seaPaint(geom, W) {
-  const m = await mosaic(ESRI, 'esri', 9, [29.9, 43.8, 30.1, 43.95]);
-  let r = 0, g = 0, b = 0;
-  const n = m.W * m.H;
-  for (let i = 0; i < n; i++) { r += m.buf[i * 3]; g += m.buf[i * 3 + 1]; b += m.buf[i * 3 + 2]; }
-  const col = [r / n, g / n, b / n];
-  const tb = turf.bbox(geom);
-  const bbox = [tb[0] - 0.03, tb[1] - 0.03, tb[2] + 0.03, tb[3] + 0.03];
-  const H = outputSize(bbox, W);
-  const rgb = Buffer.alloc(W * H * 3);
-  // a little texture so the painted water isn't perfectly flat
-  for (let i = 0; i < W * H; i++) {
-    const k = 1 + (Math.sin(i * 0.013) * Math.sin(i * 0.0007) * 0.03);
-    for (let c = 0; c < 3; c++) rgb[i * 3 + c] = Math.min(255, col[c] * k);
-  }
-  // soft shallow-water edge: dilate the shape slightly before blurring
-  return write('sea', bbox, W, H, rgb, await mask(geom, bbox, W, H, 3));
-}
+const SRC = { afghan: [66.05, 31.95], czech: [15.35, 49.45], alps: [8.05, 46.45], ukraine: [33.2, 48.9] };
+const pad = (b, d) => [b[0] - d, b[1] - d, b[2] + d, b[3] + d];
 
 (async () => {
   const layers = [];
-  layers.push(await transplant('takistan', fiction.takistan, [66.05, 31.95], 2048, { blur: 14, gain: 0.95 }));
-  layers.push(await transplant('zagoria', fiction.zagoria, [14.25, 49.35], 1200, { blur: 10, gain: 0.92 }));
-  layers.push(await transplant('black-mountains', fiction.blackMountains, [8.05, 46.45], 1800, { blur: 12, gain: 0.92 }));
-  layers.push(await seaPaint(fiction.seaPaint, 1200));
+
+  // 1. Takistan (whole country): Afghan desert and mountains
+  const tBox = pad(turf.bbox(fiction.takistan), 0.06);
+  const tCenter = centerOf(tBox);
+  const afghan = await sampler(tCenter, SRC.afghan, tBox, 10, 0.95);
+  {
+    const W = 2048, H = heightFor(tBox, W);
+    const rgb = new Float32Array(W * H * 3);
+    forEachPixel(tBox, W, H, (i, lon, lat) => afghan(lon, lat, rgb, i * 3));
+    layers.push(await write('takistan', tBox, W, H, rgb, await mask(fiction.takistan, tBox, W, H, 3)));
+  }
+
+  // 2. The redrawn Chernarus zone: sea + land textures exactly following the traced map
+  const zBox = pad(turf.bbox(fiction.zone), 0.02);
+  const W = 2400, H = heightFor(zBox, W);
+  const zCenter = centerOf(zBox);
+  const czech = await sampler(zCenter, SRC.czech, zBox, 10, 0.95);
+  const alps = await sampler([zCenter[0], 45.3], SRC.alps, zBox, 10, 0.92);
+  const ukraine = await sampler(zCenter, SRC.ukraine, zBox, 10, 0.92);
+  const zAfghan = await sampler(tCenter, SRC.afghan, zBox, 10, 0.95);
+  const [mZone, mChr, mRus, mTks, mRidge] = await Promise.all([
+    mask(fiction.zone, zBox, W, H, 40), mask(fiction.chernarus, zBox, W, H, 1.5), mask(fiction.russia, zBox, W, H, 1.5),
+    mask(fiction.takistanZone, zBox, W, H, 1.5), mask(fiction.ridge, zBox, W, H, 22),
+  ]);
+  const land = new Float32Array(W * H);
+  for (let i = 0; i < land.length; i++) land[i] = Math.min(1, mChr[i] + mRus[i] + mTks[i]);
+  const landImg = await sharp(Buffer.from(land.map((v) => v * 255)), { raw: { width: W, height: H, channels: 1 } }).blur(16).raw().toBuffer();
+
+  const sea = await mosaic(ESRI, 'esri', 9, [29.9, 43.8, 30.1, 43.95]);
+  const deep = [0, 0, 0];
+  for (let i = 0; i < sea.W * sea.H; i++) for (let c = 0; c < 3; c++) deep[c] += sea.buf[i * 3 + c] / (sea.W * sea.H);
+  const shallow = [deep[0] * 0.6 + 70 * 0.4, deep[1] * 0.6 + 120 * 0.4, deep[2] * 0.6 + 125 * 0.4];
+
+  const rgb = new Float32Array(W * H * 3);
+  const t = [0, 0, 0], u = [0, 0, 0];
+  forEachPixel(zBox, W, H, (i, lon, lat) => {
+    const o = i * 3;
+    const near = landImg[i] / 255;
+    for (let c = 0; c < 3; c++) rgb[o + c] = deep[c] + (shallow[c] - deep[c]) * near;
+    if (land[i] > 0) {
+      const total = mChr[i] + mRus[i] + mTks[i];
+      for (let c = 0; c < 3; c++) t[c] = 0;
+      if (mChr[i] > 0) { czech(lon, lat, u, 0); for (let c = 0; c < 3; c++) t[c] += u[c] * mChr[i] / total; }
+      if (mRus[i] > 0) { ukraine(lon, lat, u, 0); for (let c = 0; c < 3; c++) t[c] += u[c] * mRus[i] / total; }
+      if (mTks[i] > 0) { zAfghan(lon, lat, u, 0); for (let c = 0; c < 3; c++) t[c] += u[c] * mTks[i] / total; }
+      const r = mRidge[i] * (1 - mTks[i]);
+      if (r > 0.01) { alps(lon, lat, u, 0); for (let c = 0; c < 3; c++) t[c] = t[c] * (1 - r) + u[c] * r; }
+      for (let c = 0; c < 3; c++) rgb[o + c] = rgb[o + c] * (1 - land[i]) + t[c] * land[i];
+    }
+  });
+  layers.push(await write('chernarus', zBox, W, H, rgb, mZone));
+
   fs.writeFileSync(path.join(dataDir, 'terrain.json'), JSON.stringify(layers));
 })();

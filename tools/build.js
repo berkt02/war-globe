@@ -41,62 +41,36 @@ const taken = turf.intersect(fc(ukr, occupied));
 byId.RUS.geometry = turf.union(fc(byId.RUS, taken)).geometry;
 ukr.geometry = turf.difference(fc(ukr, occupied)).geometry;
 
-// --- Chernarus and Takistan carved out of Romania / Bulgaria
-const chernBox = poly([[27.95, 45.6], [30.2, 45.6], [30.2, 43.06], [27.9, 43.06], [27.45, 43.1],
-  [27.15, 43.25], [27.35, 43.55], [27.25, 43.9], [27.3, 44.15], [27.75, 44.4], [27.95, 44.75], [27.88, 45.1], [28.0, 45.45]]);
-const takBox = turf.difference(fc(poly([[27.3, 44.15], [27.25, 43.9], [27.35, 43.55], [27.15, 43.25], [27.4, 42.95],
-  [27.75, 42.75], [27.2, 42.55], [26.5, 42.6], [25.9, 42.5], [25.45, 42.75], [25.6, 43.05], [25.35, 43.35],
-  [25.45, 43.7], [25.9, 43.9], [26.4, 44.1], [26.9, 44.2]]), chernBox));
-const parts = { CHR: [], TKS: [] };
+// --- Chernarus (exact silhouette from the game map, see chernarus.js) and Takistan
+const CH = require('./chernarus').shapes();
+// Takistan takes north-east Bulgaria and southern Dobruja
+const takBox = poly([[29.0, 45.6], [29.0, 43.06], [27.9, 43.06], [27.75, 42.75], [27.2, 42.55], [26.5, 42.6], [25.9, 42.5],
+  [25.45, 42.75], [25.6, 43.05], [25.35, 43.35], [25.45, 43.7], [25.9, 43.9], [26.4, 44.1], [26.9, 44.2], [27.3, 44.15],
+  [27.75, 44.4], [27.95, 44.75], [27.88, 45.1], [28.0, 45.45], [27.95, 45.6]]);
+const tParts = [];
 for (const id of ['ROU', 'BGR']) {
   const c = byId[id];
-  const a = turf.intersect(fc(c, chernBox)); if (a) parts.CHR.push(a);
-  const b = turf.intersect(fc(c, takBox)); if (b) parts.TKS.push(b);
-  c.geometry = turf.difference(fc(c, chernBox)).geometry;
+  const a = turf.intersect(fc(c, takBox)); if (a) tParts.push(a);
   c.geometry = turf.difference(fc(c, takBox)).geometry;
 }
-// deterministic midpoint-displacement wobble, so cut lines look like natural coast / borders
-let seed = 7;
-const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) - 0.5;
-function wobble(pts, ampKm, depth = 5) {
-  let line = pts;
-  let amp = ampKm;
-  for (let d = 0; d < depth; d++, amp *= 0.55) {
-    const out = [line[0]];
-    for (let i = 1; i < line.length; i++) {
-      const a = line[i - 1], b = line[i];
-      const mid = turf.midpoint(a, b).geometry.coordinates;
-      const brg = turf.bearing(a, b) + 90;
-      out.push(turf.destination(mid, rnd() * 2 * amp, brg).geometry.coordinates, b);
-    }
-    line = out;
-  }
-  return line;
+// everything inside the redrawn zone is replaced by the traced shapes
+const zb = turf.bbox(CH.zone);
+for (const f of Object.values(byId)) {
+  const b = turf.bbox(f);
+  if (b[2] < zb[0] || b[0] > zb[2] || b[3] < zb[1] || b[1] > zb[3]) continue;
+  const rest = turf.difference(fc(f, CH.zone));
+  if (rest) f.geometry = rest.geometry; else delete byId[f.properties.id];
 }
-
-// New coastline: runs diagonally from the north-east (Chernogorsk) to Novigrad in the south-west, like the game map.
-const coast = wobble([[29.8, 45.02], [29.35, 44.88], [29.15, 44.8], [28.75, 44.55], [28.45, 44.2], [28.3, 43.85],
-  [28.1, 43.5], [27.95, 43.2], [27.97, 43.08]], 3.2);
-const seaCut = poly([...coast, [28.6, 43.07], [30.6, 43.07], [30.6, 45.02]]);
-// Black Mountains: alpine ridge along the northern border of Chernarus
-const blackMountains = poly(wobble([[27.92, 44.98], [28.4, 44.95], [28.9, 44.97], [29.3, 44.93], [29.78, 45.04],
-  [29.8, 45.28], [29.2, 45.42], [28.6, 45.47], [28.1, 45.43], [27.9, 45.3], [27.92, 44.98]], 2.5, 4));
-
-const merge = (arr) => arr.length > 1 ? turf.union(fc(...arr)).geometry : arr[0].geometry;
-// Utes island off the coast
-const chernLand = turf.feature(merge(parts.CHR));
-const islands = [turf.circle([29.5, 44.5], 6, { steps: 16, units: 'kilometers' }),
-  turf.circle([28.1, 43.13], 2.5, { steps: 10, units: 'kilometers' })];
-// South Zagoria: the Razim lagoons under the Black Mountains become forested hills
-const zagoria = turf.difference(fc(poly(wobble([[28.72, 44.6], [28.6, 44.82], [28.68, 45.03], [29.4, 45.02],
-  [29.85, 45.08], [29.85, 44.6], [28.72, 44.6]], 2, 4)), seaCut));
-const chernGeom = turf.union(fc(turf.difference(fc(chernLand, seaCut)), zagoria, ...islands)).geometry;
-// land that becomes sea (painted over the satellite image), with a small margin into the real sea
-const seaPaint = turf.difference(fc(turf.intersect(fc(turf.buffer(chernLand, 3, { units: 'kilometers' }), seaCut)), ...islands));
+const tks = turf.difference(fc(turf.union(fc(...tParts)), CH.zone));
+const tksZone = turf.intersect(fc(CH.takistan, CH.zone));
+const rusZone = turf.difference(fc(turf.intersect(fc(CH.russia, CH.zone)), CH.lake));
+byId.RUS.geometry = turf.union(fc(byId.RUS, rusZone)).geometry;
+const chernGeom = turf.union(fc(CH.chernarus, ...CH.islands)).geometry;
 byId.CHR = { type: 'Feature', geometry: chernGeom,
-  properties: { id: 'CHR', name: 'Chernarus', nameRu: 'Чернорусь', lx: 28.05, ly: 44.3, minLabel: 2, cx: 27.88, cy: 43.22 } };
-byId.TKS = { type: 'Feature', geometry: merge(parts.TKS),
-  properties: { id: 'TKS', name: 'Takistan', nameRu: 'Такистан', lx: 26.3, ly: 43.4, minLabel: 2, cx: 26.45, cy: 43.05 } };
+  properties: { id: 'CHR', name: 'Chernarus', nameRu: 'Чернорусь', lx: CH.label[0], ly: CH.label[1], minLabel: 2,
+    cx: CH.cities[0][1], cy: CH.cities[0][2] } };
+byId.TKS = { type: 'Feature', geometry: turf.union(fc(tks, tksZone)).geometry,
+  properties: { id: 'TKS', name: 'Takistan', nameRu: 'Такистан', lx: 26.6, ly: 43.6, minLabel: 2, cx: 26.45, cy: 43.05 } };
 byId.ROU.properties.lx = 24.6; byId.ROU.properties.ly = 45.8;
 byId.BGR.properties.lx = 24.4; byId.BGR.properties.ly = 42.6;
 byId.UKR.properties.lx = 31.2; byId.UKR.properties.ly = 49.4;
@@ -109,17 +83,18 @@ for (const pl of places.features) {
 }
 
 // Green Sea: soft green tint rings in the western Black Sea, minus land
-const land = ['CHR', 'TKS', 'BGR', 'ROU', 'UKR', 'RUS', 'TUR', 'MDA'].map((k) => byId[k]);
+const land = ['CHR', 'TKS', 'BGR', 'ROU', 'UKR', 'RUS', 'TUR', 'MDA'].map((k) => byId[k]).filter(Boolean);
 const tint = [];
 for (const [r, o] of Array.from({ length: 12 }, (_, i) => [40 + i * 22, 0.028])) {
-  let e = turf.ellipse([29.3, 43.85], r * 1.15, r, { units: 'kilometers', steps: 64 });
+  let e = turf.ellipse([29.0, 44.0], r * 1.15, r, { units: 'kilometers', steps: 64 });
   for (const l of land) { if (!e) break; e = turf.difference(fc(e, l)); }
   if (e) tint.push({ ...e, properties: { o } });
 }
 fs.writeFileSync(path.join(outDir, 'greensea.json'), JSON.stringify(turf.featureCollection(tint)));
 // shapes used by tools/terrain.js to paint the fictional terrain
 fs.writeFileSync(path.join(outDir, 'fiction.json'), JSON.stringify({
-  seaPaint: seaPaint.geometry, zagoria: zagoria.geometry, blackMountains: blackMountains.geometry, takistan: byId.TKS.geometry,
+  zone: CH.zone.geometry, chernarus: chernGeom, russia: rusZone.geometry, takistanZone: tksZone.geometry,
+  ridge: CH.ridge.geometry, lake: CH.lake.geometry, takistan: byId.TKS.geometry,
 }));
 
 // round coordinates to keep the file small
@@ -131,14 +106,13 @@ fs.writeFileSync(path.join(outDir, 'world.json'), JSON.stringify(world));
 const inBox = (b, x, y) => turf.booleanPointInPolygon([x, y], b);
 const cities = places.features
   .map((f) => f.properties)
-  .filter((p) => !inBox(chernBox, p.longitude, p.latitude) && !inBox(takBox, p.longitude, p.latitude))
+  .filter((p) => !inBox(CH.zone, p.longitude, p.latitude) && !inBox(takBox, p.longitude, p.latitude))
   .map((p) => ({ n: p.name, x: +p.longitude.toFixed(3), y: +p.latitude.toFixed(3),
     z: Math.max(1.5, p.min_zoom || 4), cap: p.adm0cap ? 1 : 0 }));
 const custom = [
-  ['Novigrad', 27.88, 43.22, 1], ['Chernogorsk', 29.0, 44.76, 0], ['Primorsk', 28.13, 43.75, 0],
-  ['Miroslavl', 28.55, 44.52, 0], ['Kirovograd', 27.7, 44.05, 0], ['Belozersk', 28.05, 44.9, 0],
-  ['Utes', 29.5, 44.5, 0], ['Moschnyi', 28.1, 43.13, 0],
+  ...CH.cities,
   ['Rasman', 26.45, 43.05, 1], ['Loy Manara', 25.8, 43.75, 0], ['Feruz Abad', 26.9, 43.6, 0], ['Garmsar', 25.7, 43.0, 0],
+  ['Nagara', 27.6, 43.55, 0], ['Zavarak', 28.1, 44.25, 0],
 ].map(([n, x, y, cap]) => ({ n, x, y, z: 2.5, cap }));
 fs.writeFileSync(path.join(outDir, 'cities.json'), JSON.stringify([...cities, ...custom]));
 console.log('countries', world.features.length, 'cities', cities.length + custom.length,
